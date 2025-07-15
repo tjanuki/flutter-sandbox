@@ -39,7 +39,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
           },
           onPageFinished: (String url) {
             setState(() {
-              _isLoading = ealse;
+              _isLoading = false;
             });
             _injectJavaScript();
           },
