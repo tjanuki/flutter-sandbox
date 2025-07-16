@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../services/webview_service.dart';
 import '../services/notification_service.dart';
+import '../utils/javascript_bridge.dart';
+import 'dart:io';
+import 'dart:async';
 
 class WebViewScreen extends StatefulWidget {
   const WebViewScreen({Key? key}) : super(key: key);
@@ -10,9 +13,14 @@ class WebViewScreen extends StatefulWidget {
   State<WebViewScreen> createState() => _WebViewScreenState();
 }
 
-class _WebViewScreenState extends State<WebViewScreen> {
+class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserver {
   late final WebViewController _controller;
   bool _isLoading = true;
+  bool _hasError = false;
+  String _errorMessage = '';
+  Timer? _retryTimer;
+  int _retryCount = 0;
+  static const int _maxRetries = 3;
   
   // Replace with your Laravel app URL
   final String _laravelUrl = 'https://your-laravel-app.com/messaging';
@@ -20,7 +28,22 @@ class _WebViewScreenState extends State<WebViewScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeWebView();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retryTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _controller.reload();
+    }
   }
 
   void _initializeWebView() {
@@ -40,16 +63,25 @@ class _WebViewScreenState extends State<WebViewScreen> {
           onPageFinished: (String url) {
             setState(() {
               _isLoading = false;
+              _hasError = false;
+              _retryCount = 0;
             });
             _injectJavaScript();
           },
           onWebResourceError: (WebResourceError error) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Web resource error: ${error.description}'),
-                backgroundColor: Colors.red,
-              ),
-            );
+            setState(() {
+              _hasError = true;
+              _errorMessage = error.description;
+              _isLoading = false;
+            });
+            _handleWebViewError(error);
+          },
+          onHttpError: (HttpResponseError error) {
+            setState(() {
+              _hasError = true;
+              _errorMessage = 'HTTP Error: ${error.response?.statusCode}';
+              _isLoading = false;
+            });
           },
         ),
       )
@@ -63,30 +95,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _injectJavaScript() {
-    _controller.runJavaScript('''
-      window.FlutterBridge = {
-        sendNotification: function(title, body, data) {
-          FlutterBridge.postMessage(JSON.stringify({
-            type: 'notification',
-            title: title,
-            body: body,
-            data: data
-          }));
-        },
-        
-        sendMessage: function(message) {
-          FlutterBridge.postMessage(JSON.stringify({
-            type: 'message',
-            data: message
-          }));
-        }
-      };
-      
-      // Notify web app that Flutter bridge is ready
-      if (window.onFlutterBridgeReady) {
-        window.onFlutterBridgeReady();
-      }
-    ''');
+    _controller.runJavaScript(JavaScriptBridge.bridgeScript);
+    _controller.runJavaScript(JavaScriptBridge.notificationPermissionScript);
+    _controller.runJavaScript(JavaScriptBridge.serviceWorkerScript);
   }
 
   void _handleMessageFromWebView(String message) {
@@ -101,12 +112,147 @@ class _WebViewScreenState extends State<WebViewScreen> {
             payload: data['data']?.toString(),
           );
           break;
+          
         case 'message':
-          // Handle other message types
+          _handleRegularMessage(data);
           break;
+          
+        case 'user_status':
+          _handleUserStatus(data['status']);
+          break;
+          
+        case 'typing_indicator':
+          _handleTypingIndicator(data['isTyping'], data['userId']);
+          break;
+          
+        case 'request_device_token':
+          _handleDeviceTokenRequest();
+          break;
+          
+        case 'subscribe_topic':
+          _handleTopicSubscription(data['topic'], true);
+          break;
+          
+        case 'unsubscribe_topic':
+          _handleTopicSubscription(data['topic'], false);
+          break;
+          
+        case 'notification_permission':
+          _handleNotificationPermission(data['permission']);
+          break;
+          
+        default:
+          print('Unknown message type: ${data['type']}');
       }
     } catch (e) {
       print('Error handling message from WebView: $e');
+      _sendErrorToWebView('Failed to parse message: $e');
+    }
+  }
+
+  void _handleRegularMessage(Map<String, dynamic> data) {
+    // Handle regular message data
+    print('Received message: $data');
+  }
+
+  void _handleUserStatus(String status) {
+    // Handle user status updates
+    print('User status changed: $status');
+  }
+
+  void _handleTypingIndicator(bool isTyping, String userId) {
+    // Handle typing indicator updates
+    print('User $userId is typing: $isTyping');
+  }
+
+  void _handleDeviceTokenRequest() async {
+    try {
+      final token = await NotificationService.getDeviceToken();
+      _sendDeviceTokenToWebView(token);
+    } catch (e) {
+      print('Error getting device token: $e');
+      _sendErrorToWebView('Failed to get device token');
+    }
+  }
+
+  void _handleTopicSubscription(String topic, bool subscribe) async {
+    try {
+      if (subscribe) {
+        await NotificationService.subscribeToTopic(topic);
+      } else {
+        await NotificationService.unsubscribeFromTopic(topic);
+      }
+      _sendTopicSubscriptionResult(topic, subscribe, true);
+    } catch (e) {
+      print('Error with topic subscription: $e');
+      _sendTopicSubscriptionResult(topic, subscribe, false);
+    }
+  }
+
+  void _handleNotificationPermission(String permission) {
+    print('Web notification permission: $permission');
+  }
+
+  void _sendDeviceTokenToWebView(String token) {
+    _controller.runJavaScript('''
+      if (window.onDeviceTokenReceived) {
+        window.onDeviceTokenReceived('$token');
+      }
+    ''');
+  }
+
+  void _sendTopicSubscriptionResult(String topic, bool subscribe, bool success) {
+    final action = subscribe ? 'subscribed' : 'unsubscribed';
+    _controller.runJavaScript('''
+      if (window.onTopicSubscriptionResult) {
+        window.onTopicSubscriptionResult('$topic', '$action', $success);
+      }
+    ''');
+  }
+
+  void _sendErrorToWebView(String error) {
+    _controller.runJavaScript('''
+      if (window.onFlutterError) {
+        window.onFlutterError('$error');
+      }
+    ''');
+  }
+
+  void _handleWebViewError(WebResourceError error) {
+    if (_retryCount < _maxRetries) {
+      _retryTimer = Timer(Duration(seconds: 2 * (_retryCount + 1)), () {
+        _retryCount++;
+        _reloadWebView();
+      });
+    } else {
+      _showErrorSnackBar('Failed to load after $_maxRetries attempts');
+    }
+  }
+
+  void _reloadWebView() {
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
+    _controller.reload();
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          action: SnackBarAction(
+            label: 'Retry',
+            textColor: Colors.white,
+            onPressed: () {
+              _retryCount = 0;
+              _reloadWebView();
+            },
+          ),
+        ),
+      );
     }
   }
 
@@ -123,14 +269,59 @@ class _WebViewScreenState extends State<WebViewScreen> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _controller),
-          if (_isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          _reloadWebView();
+        },
+        child: Stack(
+          children: [
+            if (!_hasError) WebViewWidget(controller: _controller),
+            if (_hasError) _buildErrorView(),
+            if (_isLoading)
+              const Center(
+                child: CircularProgressIndicator(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: Colors.red.shade300,
             ),
-        ],
+            const SizedBox(height: 16),
+            Text(
+              'Failed to load messaging app',
+              style: Theme.of(context).textTheme.headlineSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage,
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () {
+                _retryCount = 0;
+                _reloadWebView();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
