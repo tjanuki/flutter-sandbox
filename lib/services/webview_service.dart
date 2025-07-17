@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 class WebViewService {
+  static final List<Map<String, dynamic>> _messageQueue = [];
   static Map<String, dynamic> parseMessage(String message) {
     try {
       return json.decode(message);

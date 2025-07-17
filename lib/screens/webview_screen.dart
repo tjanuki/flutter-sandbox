@@ -3,7 +3,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../services/webview_service.dart';
 import '../services/notification_service.dart';
 import '../utils/javascript_bridge.dart';
-import 'dart:io';
+import 'notification_test_screen.dart';
 import 'dart:async';
 
 class WebViewScreen extends StatefulWidget {
@@ -193,7 +193,7 @@ class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserv
     print('Web notification permission: $permission');
   }
 
-  void _sendDeviceTokenToWebView(String token) {
+  void _sendDeviceTokenToWebView(String? token) {
     _controller.runJavaScript('''
       if (window.onDeviceTokenReceived) {
         window.onDeviceTokenReceived('$token');
@@ -262,7 +262,19 @@ class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserv
       appBar: AppBar(
         title: const Text('Messaging App'),
         backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const NotificationTestScreen(),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => _controller.reload(),

@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'screens/webview_screen.dart';
 import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Initialize Firebase (required for FCM)
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    print('Firebase initialization failed: $e');
+  }
+  
   // Initialize notification service
   await NotificationService.initialize();
-  
-  // Request notification permissions
-  await Permission.notification.request();
   
   runApp(const MessagingApp());
 }
