@@ -22,8 +22,8 @@ class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserv
   int _retryCount = 0;
   static const int _maxRetries = 3;
   
-  // Replace with your Laravel app URL
-  final String _laravelUrl = 'https://your-laravel-app.com/messaging';
+  // Laravel app served by Herd
+  final String _laravelUrl = 'https://messaging-backend-sandbox.test/messaging';
 
   @override
   void initState() {
