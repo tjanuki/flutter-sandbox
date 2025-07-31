@@ -106,10 +106,10 @@ class _WebViewScreenState extends State<WebViewScreen> with WidgetsBindingObserv
       
       switch (data['type']) {
         case 'notification':
-          NotificationService.showNotification(
+          NotificationService.sendLocalNotification(
             title: data['title'] ?? 'New Message',
             body: data['body'] ?? '',
-            payload: data['data']?.toString(),
+            data: data['data'],
           );
           break;
           
