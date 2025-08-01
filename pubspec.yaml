@@ -12,8 +12,8 @@ dependencies:
   flutter:
     sdk: flutter
   webview_flutter: ^4.4.2
-  firebase_core: ^2.24.2
-  firebase_messaging: ^14.7.10
+  # firebase_core: ^2.24.2  # Temporarily disabled
+  # firebase_messaging: ^14.7.10  # Temporarily disabled
   # flutter_local_notifications: ^15.1.3  # Temporarily disabled due to Android compilation issue
   permission_handler: ^11.3.0
   http: ^1.2.0
